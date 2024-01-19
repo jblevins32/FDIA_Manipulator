@@ -1,6 +1,6 @@
 from main import *
 def forward_kinematics(theta):
-    theta1, theta2, theta3, theta4, theta5, theta6 = np.transpose(theta)
+    theta1, theta2, theta3, theta4, theta5, theta6 = theta
 
     r = np.array([
         (7 * np.cos(theta1)) / 100 + (9 * np.cos(theta1) * np.cos(theta2)) / 25 - (13 * np.sin(theta5) * (
@@ -25,7 +25,7 @@ def forward_kinematics(theta):
     ])
     return r
 def jacobian(theta):
-    theta1, theta2, theta3, theta4, theta5, theta6 = np.transpose(theta)
+    theta1, theta2, theta3, theta4, theta5, theta6 = theta
 
     J = np.array([
         [

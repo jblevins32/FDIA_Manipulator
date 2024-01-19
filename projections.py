@@ -1,6 +1,5 @@
 import numpy as np
-from main import *
-
+import math
 def p_omega(u,theta):
     # Calculate dplus and dminus values
     # joint bounds (rad and rad/s)
@@ -13,8 +12,8 @@ def p_omega(u,theta):
     dplus = np.zeros((6, 1))
     dminus = np.zeros((6, 1))
     for i in range(len(u)):
-        dplus[i] = np.minimum(w_upper[0, i], -gamma * (theta[0, i] - theta_upper[0, i]))
-        dminus[i] = np.maximum(w_lower[0, i], -gamma * (theta[0, i] - theta_lower[0, i]))
+        dplus[i] = np.minimum(w_upper[0, i], -gamma * (theta[i, 0] - theta_upper[0, i]))
+        dminus[i] = np.maximum(w_lower[0, i], -gamma * (theta[i, 0] - theta_lower[0, i]))
     y = u
     y = dplus * (y >= dplus) + dminus * (y <= dminus) + ((y > dminus) & (y < dplus)) * y
     return y
