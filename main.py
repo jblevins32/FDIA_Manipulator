@@ -1,9 +1,12 @@
 import dyers
 import numpy as np
-from projections import *
-from robotics_functions import *
+from jacobian import *
+from p_gamma import *
+from p_omega import *
+from forward_kinematics import *
 import math
 import matplotlib.pyplot as plt
+from scipy.integrate import odeint
 
 
 # Manipulator sends joint angles to control center
@@ -16,118 +19,122 @@ import matplotlib.pyplot as plt
 # take derivative of angle of end effector  as well
 # form into 4xn matrix. n = number joints, where the matrix is multiplied by derivative of joint angles
 
-if __name__ == '__main__':
+def model(state, t):
 
-    # region Setup
-    # Gains
-    k_1 = 50
-    k_2 = 1
+    # Parsing state vector into usable data
+    theta = state[0:6]
+    r_hat = state[6:9]
+    beta_hat = state[9]
 
-    # joint bounds (rad and rad/s)
-    theta_lower = np.array([[-180, -90, -230, -200, -115, -180]])*math.pi/180
-    theta_upper = np.array([[180, 110, 50, 200, 115, 180]])*math.pi/180
-    w_upper = np.array([[200, 200, 260, 360, 360, 450]])*math.pi/180
-    w_lower = -w_upper
+    # Attack from manipulator to controller
+    d_theta = (1 - 1 / beta) * theta0
+    tilde_theta = (1 / beta) * theta + d_theta
 
-    # Set up parameters
-    t = 0 # start time
-    tau = .001 # time step
-    t_span = 10 # max time
-    theta = np.transpose(theta_lower + 0.2*(theta_upper-theta_lower)) # Random initial starting position
-    beta_hat = 1 # scale of an attack (1 = no attack)
-    kappa = 5  # idk what this is
-    e = 0  # Initialize error
-    epsilon = .0001  # Gamma parameter
-    gamma = 5  # epsilon <= gamma <= 1
-    r = forward_kinematics(theta)
-    r_hat = r  # ???
-    r_vec = np.array([])
-    r_hat_vec = np.array([])
-    beta_hat_vec = np.array([])
-    theta_vec = np.array([])
-    t_vec = np.array([])
+    r = forward_kinematics(tilde_theta)
 
-    #endregion
+    #Desired position and velocities at each moment
+    rd = forward_kinematics(theta0) + 0.1*math.sin(t) * np.ones((1, 3))
+    rd_dot = 0.1*math.cos(t) * np.ones((1, 3))
 
-    while t <= t_span:
-        r = forward_kinematics(theta)
+    J = jacobian(tilde_theta)
 
-        #Desired location and velocities
-        rd = forward_kinematics(theta) + 0.1 * np.sin(t) * np.ones((3, 1))
-        rd_next = 0.1 * np.cos(t) * np.ones((3, 1))
+    # Control Law
+    test = rd-r
+    ctrl = (alpha*np.transpose(J)@np.transpose(rd - r))
+    u_s = p_omega(ctrl, tilde_theta)/beta_hat # Projection operator
 
-        J = jacobian(theta)
-        alpha = 1000 # parameter to scale feedback strength (> 0)
+    # Injection attack
+    u_r = beta * u_s
 
-        # Control Law
-        ctrl = (alpha*np.transpose(J)@(rd - r))/beta_hat
-        u_s = p_omega(ctrl, theta) # Projection operator
+    # Update laws
+    r_hat_dot = np.transpose(beta_hat*J@np.transpose(u_s)) - k_1*(r_hat - r)
 
-        # Injection attack
-        u_r = .01 * u_s # Why isn't this beta the same as the previous?
+    if abs(beta_hat - p_gamma(beta_hat, epsilon)) > 0:
+        s = abs(k_2*u_s@np.transpose(J)@np.transpose(r - r_hat))/abs(beta_hat - p_gamma(beta_hat, epsilon))
+    else:
+        s = 1
 
-        # Update law
-        r_hat_next = r_hat + tau*beta_hat*J@u_s - k_1*(r_hat - r) # What is k1 and k2?
+    test1 = np.transpose(r_hat - r)
+    beta_hat_dot = -k_2 * u_s @ np.transpose(J) @ np.transpose(r_hat - r) - (s * (beta_hat - p_gamma(beta_hat, epsilon)))
 
-        if abs(beta_hat - p_gamma(beta_hat, epsilon)) > 0:
-            s = abs(k_2*np.transpose(u_s)@np.transpose(J)@(r - r_hat))/abs(beta_hat - p_gamma(beta_hat, epsilon))
-        else:
-            s = 1
+    theta_dot = u_r  # sent to manipulator
 
-        beta_hat_next = beta_hat + tau*k_2*np.transpose(u_s)@np.transpose(J)@(r_hat - r) - s*(beta_hat - p_gamma(beta_hat, epsilon))
+    state_dot = np.concatenate((theta_dot, r_hat_dot, beta_hat_dot), axis=1)
+    state_dot = state_dot.flatten()
 
-        theta_next = u_r # Attacked control command received by plant
+    return state_dot
 
-        r_next = forward_kinematics(theta_next)
+# region Setup
+# Gains
+k_1 = 500
+k_2 = 500
 
-        # Checking error
-        e = abs(r - rd)
+# joint bounds (rad and rad/s)
+theta_lower = np.array([[-180, -90, -230, -200, -115, -180]])*math.pi/180
+theta_upper = np.array([[180, 110, 50, 200, 115, 180]])*math.pi/180
+w_upper = np.array([[200, 200, 260, 360, 360, 450]])*math.pi/180
+w_lower = -w_upper
 
-        # Update stuff for next iteration
-        r = r_next
-        r_hat = r_hat_next
-        beta_hat = beta_hat_next
-        theta = theta_next
+# Set up parameters
+t = np.linspace(0, 100, 1001)
+epsilon = .0001  # Gamma parameter
+gamma = 5  # epsilon <= gamma <= 1
+alpha = 1000  # parameter to scale feedback strength (> 0)
+theta = theta0 = theta_lower + 0.2*(theta_upper-theta_lower)  # Random initial starting position
+r_hat = forward_kinematics(theta0)
+beta_hat = np.array([1]).reshape(1, 1)
+beta = .5  # Actual attack
 
-        r_vec = np.concatenate((r_vec, r[0]))
-        r_hat_vec = np.concatenate((r_hat_vec, r_hat[0]))
-        beta_hat_vec = np.concatenate((beta_hat_vec, beta_hat[0]))
-        theta_vec = np.concatenate((theta_vec, theta[0]))
-        t_vec = np.concatenate((t_vec, np.array([t])))
+# Forming state vector to input to differential equation
+state = np.concatenate((theta0, forward_kinematics(theta0), beta_hat), axis=1)
+state = state.flatten()
 
-        t = t + tau
-        # endregion
+x = odeint(model, state, t)
+#endregion
 
-    # Plotting
-    plt.figure(figsize=(10, 6))
+# Plotting
+rd_vec = []
+for i in t:
+    rd = forward_kinematics(theta0) + 0.1 * math.sin(i) * np.ones((1, 3))
+    rd_vec.append(rd)
+rd_vec = np.squeeze(np.array(rd_vec))
 
-    plt.subplot(2, 2, 1)
-    plt.plot(t_vec, r_vec, label='r')
-    plt.title('r vs t')
-    plt.xlabel('t')
-    plt.ylabel('r')
-    plt.legend()
+r_vec = []
+for row in x[:, 0:6]:
+    r = forward_kinematics(row)
+    r_vec.append(r)
+r_vec = np.squeeze(np.array(r_vec))
 
-    plt.subplot(2, 2, 2)
-    plt.plot(t_vec, r_hat_vec, label='r_hat')
-    plt.title('r_hat vs t')
-    plt.xlabel('t')
-    plt.ylabel('r_hat')
-    plt.legend()
+plt.figure(figsize=(8, 6))
+plt.plot(t, x[:, 9], label='beta_hat')
+plt.axhline(y=beta, color='r', linestyle='--', label='beta')  # Add a horizontal line at y = beta
+plt.xlabel('Time')
+plt.legend()
+plt.show()
 
-    plt.subplot(2, 2, 3)
-    plt.plot(t_vec, beta_hat_vec, label='beta_hat')
-    plt.title('beta_hat vs t')
-    plt.xlabel('t')
-    plt.ylabel('beta_hat')
-    plt.legend()
+plt.figure(figsize=(8, 6))
+plt.plot(t, x[:, 8], label='r_hat')
+plt.plot(t, x[:, 7], label='r_hat')
+plt.plot(t, x[:, 6], label='r_hat')
+plt.plot(t, rd_vec[:, 2], label='rd', linestyle='--')
+plt.plot(t, rd_vec[:, 1], label='rd', linestyle='--')
+plt.plot(t, rd_vec[:, 0], label='rd', linestyle='--')
+plt.plot(t, r_vec[:, 2], label='r', linestyle='--')
+plt.plot(t, r_vec[:, 1], label='r', linestyle='--')
+plt.plot(t, r_vec[:, 0], label='r', linestyle='--')
+plt.xlabel('Time')
+plt.ylabel('End Effector Position')
+plt.legend()
+plt.show()
 
-    plt.subplot(2, 2, 4)
-    plt.plot(t_vec, theta_vec, label='theta')
-    plt.title('theta vs t')
-    plt.xlabel('t')
-    plt.ylabel('theta')
-    plt.legend()
-
-    plt.tight_layout()
-    plt.show()
+plt.figure(figsize=(8, 6))
+plt.plot(t, x[:, 5])
+plt.plot(t, x[:, 4])
+plt.plot(t, x[:, 3])
+plt.plot(t, x[:, 2])
+plt.plot(t, x[:, 1])
+plt.plot(t, x[:, 0])
+plt.xlabel('Time')
+plt.ylabel('Joint Positions')
+plt.legend()
+plt.show()

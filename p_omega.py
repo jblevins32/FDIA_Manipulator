@@ -12,18 +12,8 @@ def p_omega(u,theta):
     dplus = np.zeros((6, 1))
     dminus = np.zeros((6, 1))
     for i in range(len(u)):
-        dplus[i] = np.minimum(w_upper[0, i], -gamma * (theta[i, 0] - theta_upper[0, i]))
-        dminus[i] = np.maximum(w_lower[0, i], -gamma * (theta[i, 0] - theta_lower[0, i]))
+        dplus[i] = np.minimum(w_upper[0, i], -gamma * (theta[0, i] - theta_upper[0, i]))
+        dminus[i] = np.maximum(w_lower[0, i], -gamma * (theta[0, i] - theta_lower[0, i]))
     y = u
     y = dplus * (y >= dplus) + dminus * (y <= dminus) + ((y > dminus) & (y < dplus)) * y
-    return y
-
-def p_gamma(x, epsilon):
-    if x > 1:
-        p_gamma_soln = 1
-    elif epsilon <= x <= 1:
-        p_gamma_soln = x
-    elif x < epsilon:
-        p_gamma_soln = epsilon
-
-    return p_gamma_soln
+    return np.transpose(y)
